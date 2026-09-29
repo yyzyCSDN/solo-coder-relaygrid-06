@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
+from . import ORDER_ACTIONS
+
 class OrderState(str,Enum):
     DRAFT="draft"
     CHECKED="checked"
@@ -69,16 +71,24 @@ class SwitchingOrder:
         self.revisions[-1]=replace(self.current,state=OrderState.EXECUTING)
 
     def acknowledge(self,sequence:int,operator:str,timestamp:float):
-        if self.current.state!=OrderState.EXECUTING: raise ValueError("order not executing")
         step=next((s for s in self.current.steps if s.sequence==sequence),None)
         if step is None: raise KeyError(sequence)
-        expected=min(s.sequence for s in self.current.steps if s.sequence not in self.acknowledgements)
-        if sequence!=expected: raise ValueError("step out of order")
+        if sequence in self.acknowledgements:
+            # Idempotent replay of the same confirmation is safe; a replay
+            # carrying different evidence conflicts with the record.
+            if self.acknowledgements[sequence]!=(operator,timestamp):
+                raise ValueError("step already acknowledged with different evidence")
+            return self.current
+        if self.current.state not in {OrderState.EXECUTING,OrderState.COMPLETE}:
+            raise ValueError("order not executing")
+        pending=[s.sequence for s in self.current.steps if s.sequence not in self.acknowledgements]
+        if sequence!=min(pending): raise ValueError("step out of order")
         self.acknowledgements[sequence]=(operator,timestamp)
         if len(self.acknowledgements)==len(self.current.steps): self.revisions[-1]=replace(self.current,state=OrderState.COMPLETE)
+        return self.current
 
     def _validate_steps(self,steps):
         seq=[s.sequence for s in steps]
         if seq!=list(range(1,len(steps)+1)): raise ValueError("steps must be contiguous")
         for s in steps:
-            if s.action not in {"open","close","verify","test"}: raise ValueError(s.action)
+            if s.action not in ORDER_ACTIONS: raise ValueError(s.action)

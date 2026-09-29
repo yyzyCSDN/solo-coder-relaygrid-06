@@ -1,6 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
+from . import OBSERVATION_ACTIONS, ORDER_ACTIONS
+
 @dataclass(frozen=True)
 class WorkTag:
     tag_id: str
@@ -19,9 +21,11 @@ def can_close(branch_id: str, tags: list[WorkTag], visible_breaks: set[str], gro
 def validate_sequence(operations: list[tuple[str,str]], tags: list[WorkTag], visible_breaks: set[str], grounded_sections: set[str]):
     violations=[]
     for idx,(action,branch_id) in enumerate(operations):
-        if action=="close":
+        if action not in ORDER_ACTIONS:
+            violations.append((idx,branch_id,("unknown_action",)))
+        elif action=="close":
             ok,reasons=can_close(branch_id,tags,visible_breaks,grounded_sections)
             if not ok: violations.append((idx,branch_id,tuple(reasons)))
-        elif action!="open":
-            violations.append((idx,branch_id,("unknown_action",)))
+        # "open" is always permitted; verify/test are passive observation
+        # steps that never change device state, so they need no interlock.
     return violations

@@ -41,6 +41,13 @@ class CommandBus:
 
     def complete(self,command:Command,status:str,completed_at:float,observed_state:str|None=None):
         if status not in {"success","failed","rejected"}: raise ValueError(status)
-        self.completed[command.command_id]=CommandResult(command.command_id,status,completed_at,observed_state)
+        # A command's terminal state is immutable: the first reported outcome
+        # wins, so a late failure cannot overwrite an earlier success (and
+        # a duplicate completion replays safely as a no-op).
+        if command.command_id in self.completed:
+            return self.completed[command.command_id]
+        result=CommandResult(command.command_id,status,completed_at,observed_state)
+        self.completed[command.command_id]=result
+        return result
 
     def outstanding_for(self,device_id:str): return [c for c in self.pending if c.device_id==device_id]
