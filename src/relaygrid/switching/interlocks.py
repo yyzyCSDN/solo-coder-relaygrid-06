@@ -1,6 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
+from .actions import OBSERVATION_STEPS
+
 @dataclass(frozen=True)
 class WorkTag:
     tag_id: str
@@ -22,6 +24,11 @@ def validate_sequence(operations: list[tuple[str,str]], tags: list[WorkTag], vis
         if action=="close":
             ok,reasons=can_close(branch_id,tags,visible_breaks,grounded_sections)
             if not ok: violations.append((idx,branch_id,tuple(reasons)))
-        elif action!="open":
+        elif action=="open" or action in OBSERVATION_STEPS:
+            # Opening restores safety margins; verify/test are read-only
+            # observation steps. Neither can energize a work area, so they
+            # carry no closing interlocks and must not be reported unknown.
+            continue
+        else:
             violations.append((idx,branch_id,("unknown_action",)))
     return violations

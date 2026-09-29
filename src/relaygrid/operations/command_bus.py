@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass,field
 from collections import deque
 
+from ..switching.actions import DEVICE_COMMANDS
+
 @dataclass(frozen=True)
 class Command:
     command_id:str
@@ -27,7 +29,7 @@ class CommandBus:
     def submit(self,command:Command,now:float):
         if command.command_id in self.seen_ids: raise ValueError("duplicate command")
         if command.expires_at<=now: raise ValueError("expired command")
-        if command.action not in {"open","close","trip","reset"}: raise ValueError("unsupported action")
+        if command.action not in DEVICE_COMMANDS: raise ValueError("unsupported action")
         self.seen_ids.add(command.command_id); self.pending.append(command)
 
     def next_for(self,device_id:str,now:float):
@@ -41,6 +43,16 @@ class CommandBus:
 
     def complete(self,command:Command,status:str,completed_at:float,observed_state:str|None=None):
         if status not in {"success","failed","rejected"}: raise ValueError(status)
-        self.completed[command.command_id]=CommandResult(command.command_id,status,completed_at,observed_state)
+        result=CommandResult(command.command_id,status,completed_at,observed_state)
+        # Terminal results are write-once: the first terminal report wins and
+        # the settled command can never move backwards. A later report is
+        # either an identical idempotent replay or a stale duplicate (e.g. a
+        # failure arriving after a success); either way it is ignored. Expiry
+        # recorded by next_for is terminal too.
+        existing=self.completed.get(command.command_id)
+        if existing is not None:
+            return existing
+        self.completed[command.command_id]=result
+        return result
 
     def outstanding_for(self,device_id:str): return [c for c in self.pending if c.device_id==device_id]
